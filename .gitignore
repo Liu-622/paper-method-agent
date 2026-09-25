@@ -1,0 +1,46 @@
+# Local secrets (templates are intentionally tracked)
+.env
+.env.*
+!.env.example
+!.env.local.example
+!.env.production.example
+config.env
+*.pem
+*.key
+# Reinstallable/generated files
+node_modules/
+dist/
+dist-ssr/
+.vite/
+public/pdfjs/
+*.tsbuildinfo
+*.timestamp-*
+__pycache__/
+*.pyc
+# Private inputs and runtime records
+testpapers/
+papers/
+benchmark/cache/
+lab/
+lab-test/
+lab-nokey/
+lab-paper-test/
+lab-paper-unit/
+docs/results/
+*.log
+*.pid
+_scratch/
+_shots/
+shots/
+shots2/
+playwright-report/
+test-results/
+portable-build/
+tmp/
+temp/
+*.zip
+*.exe
+.DS_Store
+Thumbs.db
+desktop.ini
+# Intentionally include third_party/, lab-models/, lab-cases/ for reproducibility.

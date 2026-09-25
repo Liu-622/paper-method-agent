@@ -1,0 +1,31 @@
+# Render 一键部署（Blueprint）
+# ------------------------------------------------------------------
+# 用法：把仓库推到 GitHub → Render 控制台 → New → Blueprint → 选择本仓库
+# 部署完成后，把 Render 给你的地址填到前端「运行设置」的「后端地址」里即可。
+#
+# 注意：模型密钥在 Render 控制台的 Environment 里填写，不要写进仓库。
+
+services:
+  - type: web
+    name: paper-repro-guard
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server/index.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      # 下面三个在控制台里填（sync: false 表示由人工在面板上设置，不落仓库）
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      # 可选：给 /api/* 加访问口令（前端「运行设置」里填同样的口令）
+      - key: API_ACCESS_TOKEN
+        sync: false
+      # 可选：收紧跨域来源为你的前端域名
+      - key: ALLOW_ORIGIN
+        value: '*'

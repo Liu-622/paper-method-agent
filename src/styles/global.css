@@ -1,0 +1,382 @@
+/* ==========================================================================
+   论文复现助手 · 设计令牌与基础层（唯一令牌来源）
+   --------------------------------------------------------------------------
+   方向：Apple 风格的专业研究工作台
+   · 浅灰背景 + 白色工作区形成层次；深色正文；蓝色只用于主操作与选中
+   · 内容优先、装饰克制；阴影只用于浮层；正文靠留白与细线组织
+   · 中文不使用负字距；公式与数字使用等宽数字
+   ========================================================================== */
+
+:root {
+  /* 背景与表面 */
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-2: #f5f5f7;
+  --surface-3: #ececf0;
+  --surface-sunken: #fafafb;
+
+  /* 文字 */
+  --text: #1d1d1f;
+  --text-2: #65656b;
+  --text-3: #8a8a90;
+  --text-inverse: #ffffff;
+
+  /* 线与边 */
+  --border: #e3e3e8;
+  --border-strong: #c9c9d1;
+  --divider: #ededf1;
+
+  /* 主操作 */
+  --accent: #0071e3;
+  --accent-strong: #0059b3;
+  --accent-weak: #eef5ff;
+  --accent-border: #cfe0f7;
+  --focus: #0071e3;
+
+  /* 状态色（仅用于对应状态，必须配文字） */
+  --ok: #1f7a4d;
+  --ok-bg: #edf7f1;
+  --ok-border: #cfe7db;
+  --warn: #9a6700;
+  --warn-bg: #fdf6e8;
+  --warn-border: #f0dfba;
+  --danger: #b42318;
+  --danger-bg: #fdf1ef;
+  --danger-border: #f2d2cd;
+
+  /* 兼容旧变量名（组件里仍在使用别名） */
+  --green: var(--ok);
+  --green-bg: var(--ok-bg);
+  --green-border: var(--ok-border);
+  --orange: var(--warn);
+  --orange-bg: var(--warn-bg);
+  --orange-border: var(--warn-border);
+  --red: var(--danger);
+  --red-bg: var(--danger-bg);
+  --red-border: var(--danger-border);
+  --slate: var(--text-2);
+  --slate-bg: var(--surface-2);
+  --slate-border: var(--border);
+  --violet: #5f5a7a;
+  --violet-bg: #f2f1f7;
+  --violet-border: #e0deea;
+
+  /* 序列色（论文 / 方法，保持稳定不随页面变化） */
+  --p1: #0071e3;
+  --p2: #9a6700;
+  --p3: #5f5a7a;
+  --series-truth: #1d1d1f;
+  --series-a: #0071e3;
+  --series-b: #9a6700;
+  --series-c: #7a8794;
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* 间距（8 的倍数为主，允许 6/10 微调） */
+  --sp-1: 4px;
+  --sp-2: 6px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+  --sp-6: 20px;
+  --sp-7: 24px;
+  --sp-8: 32px;
+  --sp-9: 40px;
+
+  /* 字号与行高 */
+  --fs-page: 26px;
+  --fs-section: 17px;
+  --fs-body: 14px;
+  --fs-small: 13px;
+  --fs-tiny: 12px;
+  --lh-tight: 1.35;
+  --lh-body: 1.65;
+  --lh-loose: 1.8;
+
+  /* 控件高度（统一） */
+  --h-control: 34px;
+  --h-control-sm: 28px;
+  --h-control-lg: 40px;
+
+  /* 结构尺寸 */
+  --sidebar-w: 220px;
+  --sidebar-w-collapsed: 64px;
+  --topbar-h: 52px;
+  --context-w: 380px;
+  --page-max: 1180px;
+  --page-max-wide: 1560px;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+
+  /* 阴影（仅浮层） */
+  --shadow-pop: 0 10px 34px rgba(29, 29, 31, 0.14);
+  --shadow-modal: 0 28px 80px rgba(29, 29, 31, 0.22);
+
+  /* 字体 */
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Source Han Sans SC', 'Noto Sans CJK SC', system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-mono: var(--mono);
+}
+
+/* ---------------------------------------------------------------- 基础重置 */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 590;
+  letter-spacing: 0;
+  color: var(--text);
+  line-height: var(--lh-tight);
+}
+
+h1 {
+  font-size: var(--fs-page);
+}
+h2 {
+  font-size: var(--fs-section);
+}
+h3 {
+  font-size: var(--fs-body);
+  font-weight: 570;
+}
+h4 {
+  font-size: var(--fs-small);
+  font-weight: 570;
+  color: var(--text-2);
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+svg text {
+  font-family: var(--font);
+}
+
+::selection {
+  background: var(--accent-weak);
+}
+
+/* 键盘可达性：统一焦点环 */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 滚动条：细、低对比 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d6d6dc transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #d6d6dc;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------- 文字工具 */
+
+.tiny {
+  font-size: var(--fs-tiny);
+  line-height: 1.55;
+}
+
+.small {
+  font-size: var(--fs-small);
+  line-height: 1.6;
+}
+
+.strong {
+  font-weight: 590;
+}
+
+.muted {
+  color: var(--text-2);
+}
+
+.muted-2 {
+  color: var(--text-3);
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.clamp-2,
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clamp-2 {
+  -webkit-line-clamp: 2;
+}
+
+.clamp-3 {
+  -webkit-line-clamp: 3;
+}
+
+/* ---------------------------------------------------------------- 布局工具 */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.row-tight {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-5);
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-5);
+}
+
+.tight-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+}
+
+.tight-list.tiny {
+  font-size: var(--fs-tiny);
+}
+
+/* 关键词强调：由结构化信息驱动（方法名/参数/指标变化） */
+.hl-mech {
+  font-weight: 590;
+}
+
+.hl-value {
+  font-weight: 590;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .grid-2,
+  .grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

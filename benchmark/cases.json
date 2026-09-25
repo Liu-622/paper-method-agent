@@ -1,0 +1,244 @@
+{
+  "meta": {
+    "createdAt": "2026-09-17",
+    "papers": {
+      "dlinear": "DLinear-Are-Transformers-Effective.pdf（15 页，文本型）",
+      "autoformer": "Autoformer.pdf（20 页，文本型）"
+    },
+    "note": "人工标准答案由人工阅读两篇 PDF 正文后写出，并已用本工具的抽取结果核对过事实（数值、数据集名、页码）。没有为了让结果好看而修改标准答案。",
+    "goldSource": "人工阅读 PDF 正文 + 工具抽取字段（benchmark/cache/*.json）交叉核对",
+    "goldChangelog": [
+      {
+        "round": 1,
+        "case": "case-2（原 case-2-split-per-dataset）",
+        "change": "原假设「DLinear 划分 7:1:2 vs Autoformer 6:2:2 → 存在差异」不成立：逐页检索后确认 DLinear 论文**全文没有写划分比例**（只说 following the experimental setting of previous work）。",
+        "action": "该案例改为比较采样间隔（ETTm1 / Traffic）；「划分比例未写明」补进 case-3 的风险项清单。"
+      },
+      {
+        "round": 1,
+        "case": "case-5",
+        "change": "原假设「DLinear 的 ETTm 都是 15 分钟」不完全对：论文**表 1 把 ETTm 粒度写作 5 min**，与 15 分钟的说法矛盾。",
+        "action": "标准答案改为「采样间隔不是统一值，且论文内部对 ETTm 的粒度自相矛盾，需要确认」。"
+      },
+      {
+        "round": 2,
+        "case": "case-1",
+        "change": "原 toolSignal 期望「整体口径下跨度一致」是错的：核对原文后确认 Autoformer 的跨度集合多出 COVID-19 的 {7,15,30} 与 ETT 完整基准跨度，整体口径下跨度确实不一致（工具判 different 是对的）。",
+        "action": "toolSignal 改为期望 different；gold 风险项改为「指标一致，但整体口径下跨度不一致」。"
+      }
+    ],
+    "arms": {
+      "A": "直接把论文正文交给同一个模型提问（无引用校验、无结论支持判定、无规则推导上下文）",
+      "B": "本工具流程：真实 PDF 按页解析 → 字段抽取 + 引用逐字校验 + 原文支持判定 → 本地规则检查 → 带引用校验的问答"
+    }
+  },
+  "cases": [
+    {
+      "id": "case-1-dataset-sets-differ",
+      "category": "数据集集合不同但共同实验一致",
+      "question": "这两篇论文的实验结果能直接比较吗？如果不完全能，请说明在什么条件下可以比较。",
+      "gold": {
+        "riskItems": [
+          {
+            "id": "dataset-sets-differ",
+            "desc": "两篇论文的数据集集合并不相同（Autoformer 多用了 COVID-19）",
+            "keywords": ["COVID", "数据集不同", "数据集集合", "不完全相同", "多了", "并不相同"]
+          },
+          {
+            "id": "shared-datasets",
+            "desc": "存在共同数据集（ETTh1/ETTh2/ETTm1/ETTm2/Traffic/Electricity/Weather/ILI/Exchange）",
+            "keywords": ["共同", "ETTh1", "ETTm1", "Traffic", "Electricity", "Weather", "ILI"]
+          },
+          {
+            "id": "conditions-partly-differ",
+            "desc": "指标集合是一致的；但整体口径下跨度集合并不一致（Autoformer 多了 COVID-19 的 {7,15,30} 与 ETT 完整基准跨度）",
+            "keywords": ["一致", "相同", "不同", "不一致", "COVID", "96", "192", "336", "720", "MSE", "MAE"]
+          }
+        ],
+        "mustNotAssert": [
+          "两篇论文的数据集完全相同",
+          "可以直接比较所有数据集上的结果与排名",
+          "两篇论文的预测跨度集合完全一致"
+        ],
+        "refusalExpected": false
+      },
+      "toolSignals": [
+        { "type": "fairness", "id": "fair-dataset", "verdict": "different", "note": "集合不同必须被指出" },
+        {
+          "type": "fairness",
+          "id": "fair-horizon",
+          "verdict": "different",
+          "note": "整体口径下跨度集合不一致（人工核对原文后确认：U2 多了 COVID-19 与 ETT 完整基准跨度）"
+        },
+        { "type": "fairness", "id": "fair-metrics", "verdict": "consistent", "note": "指标一致" }
+      ]
+    },
+    {
+      "id": "case-2-interval-per-dataset",
+      "category": "同一数据集上的实验条件不同",
+      "question": "在 ETTm1 和 Traffic 这两个数据集上，两篇论文的采样间隔分别是什么？一样吗？",
+      "gold": {
+        "riskItems": [
+          {
+            "id": "ettm1-interval-uncertain",
+            "desc": "ETTm 上两篇都按 15 分钟采样；但 DLinear 论文表 1 的粒度写作 5 分钟，与 15 分钟的说法矛盾 —— 复现时需要确认到底用哪个",
+            "keywords": ["15 分钟", "5 分钟", "5min", "不一致", "矛盾", "需确认", "确认"]
+          },
+          {
+            "id": "traffic-interval-same",
+            "desc": "Traffic 上两篇都是 1 小时采样（一致）",
+            "keywords": ["Traffic", "1 小时", "一致", "相同", "一样"]
+          }
+        ],
+        "mustNotAssert": [
+          "两篇论文的所有数据集采样间隔都相同",
+          "DLinear 所有数据集都是 5 分钟采样"
+        ],
+        "refusalExpected": false
+      },
+      "toolSignals": [
+        { "type": "scopedFairness", "id": "fair-horizon", "dataset": "Traffic", "verdict": "consistent" },
+        {
+          "type": "fieldContains",
+          "key": "sampleInterval",
+          "keywords": ["5min"],
+          "note": "工具抽到的取值里同时保留了表 1 的 5min 与正文的 15 分钟，矛盾没有被抹平"
+        }
+      ]
+    },
+    {
+      "id": "case-3-training-details-missing",
+      "category": "关键信息未找到",
+      "question": "如果我要复现 DLinear 这篇论文的训练过程，哪些关键设置是论文里没有给出的？",
+      "gold": {
+        "riskItems": [
+          {
+            "id": "lr-missing",
+            "desc": "学习率没有给出（只说使用默认超参数、细节见代码）",
+            "keywords": ["学习率", "learning rate", "learningRate", "没有给出", "未给出", "缺失"]
+          },
+          {
+            "id": "batch-missing",
+            "desc": "批大小没有给出",
+            "keywords": ["批大小", "batch size", "batchSize", "没有给出", "未给出"]
+          },
+          {
+            "id": "epoch-missing",
+            "desc": "训练轮数没有给出",
+            "keywords": ["训练轮数", "epoch", "轮数", "没有给出", "未给出"]
+          },
+          {
+            "id": "seed-missing",
+            "desc": "随机种子没有给出",
+            "keywords": ["随机种子", "seed", "种子", "没有给出", "未给出"]
+          },
+          {
+            "id": "optimizer-missing",
+            "desc": "优化器没有给出",
+            "keywords": ["优化器", "optimizer", "Adam", "没有给出", "未给出"]
+          },
+          {
+            "id": "split-not-stated",
+            "desc": "论文全文没有写训练/验证/测试的划分比例，只说「沿用前作设置」，所以划分也无法直接确认",
+            "keywords": ["划分", "7:1:2", "6:2:2", "没有给出", "未给出", "沿用", "前作", "未说明"]
+          }
+        ],
+        "mustNotAssert": [
+          "DLinear 的学习率是 1e-4",
+          "DLinear 使用批大小 32",
+          "DLinear 训练 10 个 epoch"
+        ],
+        "refusalExpected": true
+      },
+      "toolSignals": [
+        { "type": "repro", "key": "learningRate", "verdict": "missing" },
+        { "type": "repro", "key": "batchSize", "verdict": "missing" },
+        { "type": "repro", "key": "epochs", "verdict": "missing" },
+        { "type": "repro", "key": "randomSeed", "verdict": "missing" },
+        { "type": "repro", "key": "optimizer", "verdict": "missing" }
+      ]
+    },
+    {
+      "id": "case-4-seed-both-missing",
+      "category": "关键信息未找到（正确拒答）",
+      "question": "这两篇论文的随机种子分别是多少？",
+      "gold": {
+        "riskItems": [
+          {
+            "id": "both-missing",
+            "desc": "两篇论文都没有给出随机种子，应明确说明未给出（不能编造数字）",
+            "keywords": ["没有给出", "未给出", "未说明", "缺失", "没有明确", "未提及"]
+          }
+        ],
+        "mustNotAssert": ["随机种子是 42", "种子为 2021", "种子设为 0", "种子固定为 1"],
+        "refusalExpected": true
+      },
+      "toolSignals": [
+        { "type": "repro", "key": "randomSeed", "verdict": "missing" }
+      ]
+    },
+    {
+      "id": "case-5-leading-interval",
+      "category": "引用真实但不支持结论（错误前提）",
+      "question": "有同学说 DLinear 用到的所有数据集都是 5 分钟采样，所以它和 Autoformer 的采样间隔不一样。这个说法对吗？",
+      "gold": {
+        "riskItems": [
+          {
+            "id": "interval-not-all-5min",
+            "desc": "论文给出的采样间隔不是一个统一值：ETTh 1 小时、ETTm 记作 5 分钟（表 1）／15 分钟（表述）、Traffic 1 小时、Electricity 1 小时、Exchange-Rate 1 天、Weather 10 分钟、ILI 1 周；因此「所有数据集都是 5 分钟」不成立",
+            "keywords": ["15 分钟", "1 小时", "小时", "10 分钟", "1 周", "不是 5 分钟", "并非 5 分钟", "5 分钟", "5min", "不一致"]
+          },
+          {
+            "id": "ettm-needs-confirm",
+            "desc": "ETTm 的粒度在论文内部就不一致（表 1 写 5 分钟，表述写 15 分钟），这一点需要向作者确认",
+            "keywords": ["不一致", "矛盾", "需确认", "确认", "5min", "5 分钟"]
+          }
+        ],
+        "mustNotAssert": [
+          "DLinear 所有数据集都是 5 分钟采样",
+          "两篇论文采样间隔完全一致，没有任何需要确认的地方"
+        ],
+        "refusalExpected": false
+      },
+      "toolSignals": [
+        {
+          "type": "fieldContains",
+          "key": "sampleInterval",
+          "keywords": ["5min"],
+          "note": "工具抽到的取值同时保留了表 1 的 5min 与正文的 15 分钟"
+        },
+        {
+          "type": "scopedFairness",
+          "id": "fair-horizon",
+          "dataset": "ETTm1",
+          "verdict": "consistent",
+          "note": "ETTm1 上两篇的跨度与采样间隔都取到 15 分钟，判为一致"
+        }
+      ]
+    },
+    {
+      "id": "case-6-gpu-refusal",
+      "category": "关键信息未找到（正确拒答）",
+      "question": "Autoformer 的实验用了多少块 GPU、总共训练了多长时间？",
+      "gold": {
+        "riskItems": [
+          {
+            "id": "gpu-is-stated",
+            "desc": "GPU 数量论文其实写了：实现细节说明在单块 NVIDIA TITAN RTX 24GB GPU 上运行（这部分不能答成没写）",
+            "keywords": ["TITAN", "24GB", "单块", "1 块", "一块", "GPU"]
+          },
+          {
+            "id": "duration-missing",
+            "desc": "训练总时长没有给出（只给了早停最多 10 个 epoch、每实验重复 3 次），应明确说明无法确定",
+            "keywords": ["没有找到", "没有给出", "未给出", "无法", "不能确定", "没有报告", "训练时长", "时间"]
+          }
+        ],
+        "mustNotAssert": ["训练了 3 天", "训练时间约", "总共训练 100 小时"],
+        "refusalExpected": true
+      },
+      "toolSignals": [
+        { "type": "noEvidence", "note": "工具没有 GPU/训练时长字段，正确答案来自带引用校验的问答" }
+      ]
+    }
+  ]
+}

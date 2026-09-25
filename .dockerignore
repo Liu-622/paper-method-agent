@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.gitignore
+*.log
+_*.txt
+_*.json
+shots/
+shots2/
+vtest/
+vtest2/
+testpapers/
+docs/
+README.md
+.env
+.env.local
+public/pdfjs

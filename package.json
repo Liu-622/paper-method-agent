@@ -1,0 +1,41 @@
+{
+  "name": "paper-repro-guard",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "论文复现避坑智能体 - 读懂论文的方法，找出复现实验前需要确认的问题",
+  "scripts": {
+    "dev": "vite",
+    "api": "node server/index.mjs",
+    "start": "node scripts/dev-all.mjs",
+    "assets": "node scripts/copy-pdfjs-assets.mjs",
+    "build": "node scripts/copy-pdfjs-assets.mjs && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --port 4173",
+    "serve": "node server/index.mjs",
+    "serve:dist": "node scripts/serve-dist.mjs",
+    "test:verify": "node server/test-verify.mjs",
+    "test:logic": "node scripts/test-logic.mjs",
+    "test:lab": "node scripts/test-lab.mjs",
+    "verify:lab": "node scripts/verify-lab-http.mjs",
+    "test:e2e": "node server/test-e2e.mjs",
+    "test:extract": "node scripts/retest-extract.mjs",
+    "test:extract:compare": "node scripts/extract-compare.mjs",
+    "extract:regress": "node scripts/retest-extract.mjs && node scripts/extract-compare.mjs"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.3.289",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "playwright-core": "^1.63.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.3"
+  }
+}
