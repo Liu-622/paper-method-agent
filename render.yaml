@@ -10,19 +10,23 @@ services:
     name: paper-repro-guard
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: 22
+      - key: HOST
+        value: 0.0.0.0
+      - key: LLM_API_STYLE
+        value: openai
       # 下面三个在控制台里填（sync: false 表示由人工在面板上设置，不落仓库）
       - key: LLM_BASE_URL
-        sync: false
+        value: https://api.deepseek.com
       - key: LLM_API_KEY
         sync: false
       - key: LLM_MODEL
-        sync: false
+        value: deepseek-chat
       # 可选：给 /api/* 加访问口令（前端「运行设置」里填同样的口令）
       - key: API_ACCESS_TOKEN
         sync: false

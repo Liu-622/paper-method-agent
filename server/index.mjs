@@ -73,6 +73,8 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(__dirname, '..', 'dist')
 const PORT = Number(process.env.PORT || 8787)
+// 云端由平台代理转发；本地默认仍只监听回环，避免意外暴露开发服务。
+const HOST = process.env.HOST || (process.env.RENDER === 'true' ? '0.0.0.0' : '127.0.0.1')
 const ACCESS_TOKEN = process.env.API_ACCESS_TOKEN || ''
 const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || '*'
 /** 请求体上限：正文 + 字段，给足余量 */
@@ -726,9 +728,9 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, HOST, () => {
   const s = llmStatus()
-  console.log(`[paper-repro-guard] 服务已启动： http://127.0.0.1:${PORT}/`)
+  console.log(`[paper-repro-guard] 服务已启动： http://${HOST}:${PORT}/`)
   console.log(`[paper-repro-guard] 前端产物： ${fs.existsSync(DIST) ? DIST : '（尚未构建，请先 npm run build）'}`)
   console.log(
     `[paper-repro-guard] 模型：${s.model}（${s.apiStyle}，${s.baseUrlHost || '未配置地址'}），密钥：${
