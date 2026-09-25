@@ -326,7 +326,9 @@ type Action =
   | { type: 'COLLECTION_ADD_PAPERS'; id: string; paperIds: string[] }
   | { type: 'COLLECTION_REMOVE_PAPER'; id: string; paperId: string }
   | { type: 'SET_METHOD_PROFILES'; profiles: Record<string, MethodProfile> }
+  | { type: 'UPSERT_METHOD_PROFILE'; profile: MethodProfile }
   | { type: 'SET_RELATIONS'; relations: PaperRelation[] }
+  | { type: 'SET_PAPER_MODEL_RELATIONS'; paperId: string; relations: PaperRelation[] }
   | { type: 'SET_DIRECTIONS'; directions: ResearchDirection[] }
   | { type: 'SET_PROVENANCE'; paperId: string; provenance: AnalysisProvenance }
   | { type: 'COLLECTION_STAMP_DIRTY'; collectionId: string }
@@ -631,8 +633,18 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'SET_METHOD_PROFILES':
       return { ...state, methodProfiles: action.profiles }
+    case 'UPSERT_METHOD_PROFILE':
+      return { ...state, methodProfiles: { ...state.methodProfiles, [action.profile.paperId]: action.profile } }
     case 'SET_RELATIONS':
       return { ...state, relations: action.relations }
+    case 'SET_PAPER_MODEL_RELATIONS':
+      return {
+        ...state,
+        relations: [
+          ...state.relations.filter((r) => !(r.from === action.paperId && r.generatedBy === 'model')),
+          ...action.relations,
+        ],
+      }
     case 'SET_DIRECTIONS':
       return { ...state, directions: action.directions }
     case 'SET_PROVENANCE':
@@ -670,7 +682,7 @@ interface AppContextValue {
   toast: (type: Toast['type'], message: string, detail?: string) => void
   loadDemo: () => void
   switchScope: (scope: ProjectScope) => void
-  uploadFiles: (files: File[]) => Promise<UploadIssue[]>
+  uploadFiles: (files: File[], collectionId?: string) => Promise<UploadIssue[]>
   reextract: (paperId: string, file?: File) => Promise<void>
   /**
    * 单字段补查：只对这一个字段做定向全文检索 + 引用校验。
@@ -805,6 +817,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [dispatch],
   )
 
+  useEffect(() => {
+    const onStorageWarning = (event: Event) => {
+      const detail = (event as CustomEvent<{ evictedIds?: string[]; failed?: boolean }>).detail
+      if (detail?.evictedIds?.length) {
+        detail.evictedIds.forEach((id) => {
+          dispatch({ type: 'DROP_TEXT', paperId: id })
+          dispatch({ type: 'PATCH_PAPER', id, patch: { textStored: false } })
+        })
+        toast('warning', '本地空间不足，已保留分析结果', `有 ${detail.evictedIds.length} 篇旧正文未继续保存；原 PDF 若已保存，可在论文库重新解析。`)
+      } else if (detail?.failed) {
+        toast('error', '本地保存失败', '浏览器存储空间不足，当前更改可能在刷新后丢失。请先释放本站存储空间。')
+      }
+    }
+    window.addEventListener('learnbuddy:storage-warning', onStorageWarning)
+    return () => window.removeEventListener('learnbuddy:storage-warning', onStorageWarning)
+  }, [toast])
+
   /* ---------------- 后端探测 ---------------- */
   const checkBackend = useCallback(async (): Promise<HealthResult | null> => {
     dispatch({ type: 'SET_BACKEND', backend: { status: 'checking' } })
@@ -878,6 +907,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (total > TEXT_BUDGET_CHARS) {
         // 单篇就超预算：只保存前面能装下的部分页
+        dropped.forEach((p) => {
+          dispatch({ type: 'DROP_TEXT', paperId: p.id })
+          dispatch({ type: 'PATCH_PAPER', id: p.id, patch: { textStored: false } })
+        })
         let used = 0
         const kept: PageText[] = []
         for (const p of pages) {
@@ -898,6 +931,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'SET_TEXT', paperId, pages, stored: true })
       dispatch({ type: 'PATCH_PAPER', id: paperId, patch: { textStored: true } })
       dropped.forEach((p) => {
+        dispatch({ type: 'DROP_TEXT', paperId: p.id })
         dispatch({ type: 'PATCH_PAPER', id: p.id, patch: { textStored: false } })
       })
       if (dropped.length) {
@@ -965,7 +999,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         dispatch({ type: 'SET_EVIDENCE', paperId: paper.id, items })
-        dispatch({ type: 'SET_FIELDS', paperId: paper.id, fields })
+        dispatch({ type: 'SET_FIELDS', paperId: paper.id, fields, keepUserFields: true })
         dispatch({
           type: 'PATCH_PAPER',
           id: paper.id,
@@ -993,15 +1027,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           e instanceof ApiError
             ? e.info
             : { code: 'UNKNOWN', message: e instanceof Error ? e.message : '抽取失败' }
+        const message = /fetch failed|failed to fetch|ECONNRESET|ETIMEDOUT/i.test(info.message)
+          ? '模型接口暂时连接失败。正文与原文件已保留；网络恢复后点「继续抽取」。'
+          : info.message
         dispatch({
           type: 'PATCH_PAPER',
           id: paper.id,
           patch: {
             status: 'text-only',
-            parseMessage: `正文已读取（${pages.length} 页），但字段抽取没有完成：${info.message}`,
+            parseMessage: `正文已读取（${pages.length} 页），但字段抽取没有完成：${message}`,
           },
         })
-        toast('error', `${paper.shortLabel} 字段抽取未完成`, `${info.message} 可以点「重新抽取」再试。`)
+        toast('error', `${paper.shortLabel} 字段抽取未完成`, message)
       } finally {
         dispatch({ type: 'SET_PROGRESS', paperId: paper.id, value: null })
         dispatch({ type: 'BUSY_REMOVE', id: paper.id })
@@ -1179,7 +1216,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* ---------------- 上传 ---------------- */
   const uploadFiles = useCallback(
-    async (files: File[]): Promise<UploadIssue[]> => {
+    async (files: File[], collectionId?: string): Promise<UploadIssue[]> => {
       const current = stateRef.current
       if (files.length === 0) return []
       const { accepted, issues } = validateFiles(files, current.papers)
@@ -1238,6 +1275,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
 
       dispatch({ type: 'ADD_PAPERS', papers: paperList })
+      // 在解析开始前就加入集合；中途刷新或某篇失败也不会让论文从集合消失。
+      if (collectionId && paperList.length > 0) {
+        dispatch({ type: 'COLLECTION_ADD_PAPERS', id: collectionId, paperIds: paperList.map((p) => p.id) })
+      }
       dispatch({ type: 'SET_SCOPE', scope: 'user' })
       dispatch({ type: 'SET_UPLOAD_SEQ', seq: startSeq + paperList.length })
       toast('success', `已加入 ${paperList.length} 篇论文`, '正在读取 PDF 正文并抽取字段，请稍候…')
@@ -1305,7 +1346,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       fields: {},
     }))
     dispatch({ type: 'PAPERS_ADD', papers })
-    return papers.map((p) => p.id)
+    // Re-adding a collection must include catalog papers already in the library.
+    // Keep their parsed text, evidence and method profiles instead of importing duplicates.
+    return TS_CATALOG.map((p) => p.id)
   }, [state.papers])
 
   const createCollection = useCallback((name: string, domain = '时间序列预测'): Collection => {
@@ -1347,14 +1390,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const col = state.collections.find((c) => c.id === collectionId)
     if (!col) return
     const papers = col.paperIds.map((id) => state.papers.find((p) => p.id === id)).filter((p): p is Paper => Boolean(p))
-    const profiles = classifyPapers(papers, state.evidence, state.texts)
+    const inferred = classifyPapers(papers, state.evidence, state.texts)
+    const profiles = { ...state.methodProfiles }
+    for (const paper of papers) {
+      const existing = state.methodProfiles[paper.id]
+      const userOwned = existing && [existing.family, existing.mechanisms, existing.tasks]
+        .some((tags) => tags.some((tag) => tag.origin === 'manual' || tag.manualStatus !== undefined))
+      // 重新分类只更新规则建议，不降级已经由模型复核或人工确认的档案。
+      profiles[paper.id] = existing && (existing.analyzedBy === 'model' || userOwned) ? existing : inferred[paper.id]
+    }
     dispatch({ type: 'SET_METHOD_PROFILES', profiles })
     const relations = buildRelations(papers, profiles, state.relations)
     dispatch({ type: 'SET_RELATIONS', relations })
     const covered = papers.filter((p) => profiles[p.id]?.family.some((f) => f.label !== '待分类')).map((p) => p.id)
     const failed = papers.filter((p) => !profiles[p.id]?.ownMethod).map((p) => p.id)
     dispatch({ type: 'ANALYSIS_ADD', record: makeAnalysisRecord(col, papers, profiles, covered, failed) })
-  }, [state.collections, state.papers, state.evidence, state.texts, state.relations])
+  }, [state.collections, state.papers, state.evidence, state.texts, state.relations, state.methodProfiles])
 
   const generateDirections = useCallback(async (collectionId: string): Promise<number> => {
     const col = state.collections.find((c) => c.id === collectionId)
@@ -1631,7 +1682,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (gen !== analyzeGen.current) return // 迟到结果隔离：已取消/新一轮则丢弃
         if (r.ok) {
           const profile = profileFromAnalyze(p.id, r)
-          dispatch({ type: 'SET_METHOD_PROFILES', profiles: { ...stateRef.current.methodProfiles, [p.id]: profile } })
+          dispatch({ type: 'UPSERT_METHOD_PROFILE', profile })
           const rels = (r.relations ?? []).filter((x) => x.target && (x.type === 'cites' || x.type === 'improves')).map((x, i) => {
             /**
              * 技术关系的三重校验（只找到两个方法名，不足以确认引用/改进/继承）：
@@ -1672,7 +1723,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               semanticSupport: semantic,
             }
           })
-          if (rels.length) dispatch({ type: 'SET_RELATIONS', relations: [...stateRef.current.relations.filter((r) => r.from !== p.id), ...rels] })
+          dispatch({ type: 'SET_PAPER_MODEL_RELATIONS', paperId: p.id, relations: rels })
           dispatch({ type: 'PAPERS_ADD', papers: [{ ...p, status: 'parsed', analysisVersion: ANALYSIS_VERSION }] })
           // 记录来源：内容指纹 + 分析流程版本 + 模型标识（不含密钥）→ 供缓存失效判断
           dispatch({

@@ -79,13 +79,44 @@ export function loadState(): PersistedState | null {
 let saveTimer: number | null = null
 let pendingState: PersistedState | null = null
 
+function notifyStorage(detail: { evictedIds?: string[]; failed?: boolean }): void {
+  window.dispatchEvent(new CustomEvent('learnbuddy:storage-warning', { detail }))
+}
+
 function flushState(): void {
-  if (!pendingState) return
+  const snapshot = pendingState
+  if (!snapshot) return
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(pendingState))
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
     pendingState = null
   } catch {
-    // Keep the pending snapshot so a subsequent save can retry.
+    // 配额不足时先保住论文条目、字段、证据和分析结果。原 PDF 在 IndexedDB，
+    // 正文可以从原文件重新读取；不能让整份新状态悄悄丢失。
+    const reduced: PersistedState = {
+      ...snapshot,
+      texts: { ...snapshot.texts },
+      papers: [...snapshot.papers],
+    }
+    const oldestFirst = Object.keys(reduced.texts).sort((a, b) => {
+      const at = reduced.papers.find((p) => p.id === a)?.uploadedAt ?? ''
+      const bt = reduced.papers.find((p) => p.id === b)?.uploadedAt ?? ''
+      return at.localeCompare(bt)
+    })
+    const evictedIds: string[] = []
+    for (const id of oldestFirst) {
+      delete reduced.texts[id]
+      reduced.papers = reduced.papers.map((p) => p.id === id ? { ...p, textStored: false } : p)
+      evictedIds.push(id)
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(reduced))
+        pendingState = null
+        notifyStorage({ evictedIds })
+        return
+      } catch {
+        // 继续减少正文，直到能保住其余研究结果。
+      }
+    }
+    notifyStorage({ failed: true })
   }
 }
 

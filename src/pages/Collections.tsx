@@ -9,10 +9,10 @@ import { UPLOAD_RULES } from '@/config'
 /** 文献集合：批量导入与整理（赛题能力 1 · 批量文献解析） */
 export function CollectionsPage() {
   const {
-    state, dispatch, toast, scopedPapers, collectionPapers, currentCollection,
-    createCollection, renameCollection, deleteCollection, addPapersToCollection,
+    state, dispatch, toast, collectionPapers, currentCollection,
+    createCollection, renameCollection, deleteCollection,
     removePaperFromCollection, bootstrapTsCollection, runCollectionAnalysis, uploadFiles, importCatalogPages,
-    analyzeCollectionPapers, cancelAnalysis, collectionAnalysisStatus,
+    analyzeCollectionPapers, cancelAnalysis, collectionAnalysisStatus, reextract,
   } = useApp()
   const navigate = useNavigate()
   const [name, setName] = useState('')
@@ -21,9 +21,8 @@ export function CollectionsPage() {
   const [dragging, setDragging] = useState(false)
   const [importingPages, setImportingPages] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const stateRef = useRef(state)
-  useEffect(() => { stateRef.current = state }, [state])
 
   const textReadCount = collectionPapers.filter((p) => state.texts[p.id]?.length).length
   const evidenceCount = collectionPapers.filter((p) => state.methodProfiles[p.id]?.family.some((f) => f.origin === 'paper')).length
@@ -33,8 +32,9 @@ export function CollectionsPage() {
   const analysis = currentCollection ? state.analyses.find((a) => a.collectionId === currentCollection.id) : null
   const cacheStatus = currentCollection ? collectionAnalysisStatus() : null
 
-  const pendingUpload = scopedPapers.filter((p) => p.status === 'pending' || p.status === 'parsing' || p.status === 'extracting')
-  const failed = scopedPapers.filter((p) => p.status === 'failed')
+  const pendingUpload = collectionPapers.filter((p) => p.source === 'user' && (p.status === 'pending' || p.status === 'parsing' || p.status === 'extracting'))
+  const incomplete = collectionPapers.filter((p) => p.source === 'user' && (p.status === 'failed' || p.status === 'text-only'))
+  const retryable = incomplete.filter((p) => Boolean(state.texts[p.id]?.length) || p.fileStored)
 
   const filtered = collectionPapers.filter((p) => {
     if (query && !(p.title + p.fileName).toLowerCase().includes(query.toLowerCase())) return false
@@ -46,13 +46,12 @@ export function CollectionsPage() {
 
   const onFiles = async (files: File[]) => {
     if (!currentCollection) return
-    const before = new Set(stateRef.current.papers.map((p) => p.id))
-    const issues = await uploadFiles(files)
-    // 成功后新论文会进入 store.papers，用差值找出本次新增的 id 加入集合
-    const addedIds = stateRef.current.papers.filter((p) => !before.has(p.id)).map((p) => p.id)
-    if (addedIds.length) addPapersToCollection(currentCollection.id, addedIds)
-    if (addedIds.length) toast('success', `已加入 ${addedIds.length} 篇到集合`, '逐篇解析，失败不阻断其它论文')
-    if (issues.length) toast('warning', `${issues.length} 篇未能导入`, issues[0]?.message ?? '')
+    try {
+      const issues = await uploadFiles(files, currentCollection.id)
+      if (issues.length) toast('warning', `${issues.length} 篇未能导入`, issues[0]?.message ?? '')
+    } catch (e) {
+      toast('error', '导入未完成', e instanceof Error ? e.message : String(e))
+    }
   }
 
   return (
@@ -114,6 +113,11 @@ export function CollectionsPage() {
                     <div className="tiny muted-2">{currentCollection.domain} · 最近更新 {new Date(currentCollection.updatedAt).toLocaleString()}</div>
                   </div>
                   <span className="spacer" />
+                  {currentCollection.domain === '时间序列预测' && collectionPapers.length === 0 && (
+                    <button className="btn btn-sm" onClick={() => { bootstrapTsCollection(); toast('success', '已恢复公开文献', '已将现有论文重新加入集合，保留原有正文与分析结果') }}>
+                      恢复公开文献
+                    </button>
+                  )}
                   <button className="btn btn-sm btn-ghost" disabled={importingPages} onClick={async () => { setImportingPages(true); const n = await importCatalogPages(); setImportingPages(false); toast(n > 0 ? 'success' : 'warning', `已导入 ${n} 篇真实正文`, '正文来自本地已下载的 arXiv PDF，分类将基于实际正文而非清单预置') }} title="读取本地已下载的 12 篇 arXiv PDF 正文（无需模型）">
                     <Icon name="file-text" size={13} /> 导入真实正文
                   </button>
@@ -157,7 +161,7 @@ export function CollectionsPage() {
                 className={`dropzone${dragging ? ' dragging' : ''}`}
                 onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
                 onDragLeave={() => setDragging(false)}
-                onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) onFiles(Array.from(e.dataTransfer.files)) }}
+                onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) void onFiles(Array.from(e.dataTransfer.files)) }}
               >
                 <span className="dropzone-icon"><Icon name="plus" size={20} /></span>
                 <div className="stack-sm">
@@ -167,18 +171,25 @@ export function CollectionsPage() {
                 <span className="spacer" />
                 <button className="btn" onClick={() => fileRef.current?.click()}>选择文件</button>
                 <button className="btn btn-ghost" onClick={() => navigate('/library')}>从论文库加入</button>
-                <input ref={fileRef} type="file" accept=".pdf" multiple hidden onChange={(e) => { if (e.target.files?.length) onFiles(Array.from(e.target.files)) }} />
+                <input ref={fileRef} type="file" accept=".pdf" multiple hidden onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) void onFiles(files) }} />
               </div>
 
               {/* 队列状态 */}
-              {(pendingUpload.length > 0 || failed.length > 0) && (
+              {(pendingUpload.length > 0 || incomplete.length > 0) && (
                 <div className="panel">
                   <div className="tiny muted-2">
-                    处理中 {pendingUpload.length} 篇 · 失败 {failed.length} 篇（刷新后已完成结果保留，中断任务可继续）
+                    处理中 {pendingUpload.length} 篇 · 待继续 {incomplete.length} 篇（刷新后已完成结果保留）
                   </div>
-                  {failed.length > 0 && (
+                  {incomplete.length > 0 && (
                     <div className="row-tight">
-                      <button className="btn btn-sm" onClick={() => failed.forEach((p) => addPapersToCollection(currentCollection.id, []))}>仅重试失败（保留成功结果）</button>
+                      <button className="btn btn-sm" disabled={retrying || retryable.length === 0} onClick={async () => {
+                        setRetrying(true)
+                        try {
+                          for (const paper of retryable) await reextract(paper.id)
+                          toast('info', `已重试 ${retryable.length} 篇`, '每篇结果已更新在列表中；成功的论文没有重新处理。')
+                        } finally { setRetrying(false) }
+                      }}>{retrying ? '重试中…' : `继续处理 ${retryable.length} 篇`}</button>
+                      {retryable.length < incomplete.length && <span className="tiny muted-2">另 {incomplete.length - retryable.length} 篇需在论文库重新选择原 PDF。</span>}
                     </div>
                   )}
                 </div>
@@ -209,7 +220,7 @@ export function CollectionsPage() {
                           {p.year && <span>{p.year}</span>}
                           {p.venue && <span className="tiny">{p.venue}</span>}
                           {p.source === 'catalog' && <Tag tone="violet">内置清单</Tag>}
-                          <StatusChip p={p} />
+                          <StatusChip p={p} methodAnalyzed={pr?.analyzedBy === 'model'} />
                         </div>
                         {pr && (
                           <div className="paper-tags">
@@ -235,10 +246,10 @@ export function CollectionsPage() {
   )
 }
 
-function StatusChip({ p }: { p: { status: string; source?: string; parseMessage?: string } }) {
+function StatusChip({ p, methodAnalyzed }: { p: { status: string; source?: string; parseMessage?: string }; methodAnalyzed: boolean }) {
   if (p.source === 'catalog' && p.status === 'pending') return <Tag tone="violet"><span title={p.parseMessage}>仅有元信息</span></Tag>
   const map: Record<string, [string, 'green' | 'blue' | 'slate' | 'orange' | 'red']> = {
-    parsed: ['方法分析完成', 'green'],
+    parsed: [methodAnalyzed ? '方法分析完成' : p.source === 'user' ? '字段已抽取' : '正文已读取', 'green'],
     pending: ['等待处理', 'slate'],
     parsing: ['读取正文', 'blue'],
     extracting: ['提取信息', 'blue'],

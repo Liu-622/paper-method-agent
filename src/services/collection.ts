@@ -313,8 +313,13 @@ export function buildRelations(papers: Paper[], profiles: Record<string, MethodP
   }
   // 「改进/继承」只来自模型 /api/analyze 产出且逐字命中正文的关系（在 store 里注入）。
   // 年份先后 / 参考文献 / 作基线都不构成继承，这里不再硬编码任何沿革箭头。
-  const manual = existingManual.filter((r) => r.generatedBy === 'manual')
-  return [...out, ...manual]
+  const selectedIds = new Set(papers.map((p) => p.id))
+  // 仅重算本集合的共享机制线。保留已有的模型引用/改进关系、人工关系，
+  // 以及其它集合的共享机制线，避免点「重新分类」后证据链消失。
+  const retained = existingManual.filter((r) =>
+    r.type !== 'shared-mechanism' || !selectedIds.has(r.from) || !selectedIds.has(r.to),
+  )
+  return [...out, ...retained]
 }
 
 /** 时间线（按年份 + 家族泳道） */
