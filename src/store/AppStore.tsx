@@ -1238,7 +1238,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (f) metaFiles.set(meta, f)
       }
       // 字节内容指纹去重：只看文件名/大小不可靠。同内容不同文件名也要能识别。
-      const existingFp = new Set(current.papers.filter((p) => p.fileFingerprint).map((p) => p.fileFingerprint as string))
+      const existingByFingerprint = new Map(current.papers.filter((p) => p.fileFingerprint).map((p) => [p.fileFingerprint!, p]))
+      const existingFp = new Set(existingByFingerprint.keys())
+      const reusedPapers = new Map<string, { paper: Paper; file: File }>()
       const acceptedMeta: UploadMeta[] = []
       const fpByMeta = new Map<UploadMeta, string>()
       for (const meta of accepted) {
@@ -1246,7 +1248,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!f) { acceptedMeta.push(meta); continue }
         const fp = await fingerprintBytes(f)
         if (existingFp.has(fp)) {
-          issues.push({ fileName: meta.fileName, type: 'duplicate', message: '内容相同：论文库已有同一份文件（字节指纹一致），未重复导入。可到「论文库」把它加入集合。' })
+          const existingPaper = existingByFingerprint.get(fp)
+          if (existingPaper) reusedPapers.set(existingPaper.id, { paper: existingPaper, file: f })
           continue
         }
         existingFp.add(fp)
@@ -1276,12 +1279,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       dispatch({ type: 'ADD_PAPERS', papers: paperList })
       // 在解析开始前就加入集合；中途刷新或某篇失败也不会让论文从集合消失。
-      if (collectionId && paperList.length > 0) {
-        dispatch({ type: 'COLLECTION_ADD_PAPERS', id: collectionId, paperIds: paperList.map((p) => p.id) })
+      const importedIds = [...paperList.map((p) => p.id), ...reusedPapers.keys()]
+      if (collectionId && importedIds.length > 0) {
+        dispatch({ type: 'COLLECTION_ADD_PAPERS', id: collectionId, paperIds: importedIds })
       }
       dispatch({ type: 'SET_SCOPE', scope: 'user' })
       dispatch({ type: 'SET_UPLOAD_SEQ', seq: startSeq + paperList.length })
-      toast('success', `已加入 ${paperList.length} 篇论文`, '正在读取 PDF 正文并抽取字段，请稍候…')
+      toast('success', `已接收 ${importedIds.length} 篇论文`, `新增 ${paperList.length} 篇，复用已有 ${reusedPapers.size} 篇${collectionId ? '，已加入当前集合' : ''}。已完成结果不会重复分析。`)
+
+      // 移出集合不是删除论文。重新上传同一 PDF 应恢复成员关系，而不是拦截。
+      // 原文件可恢复时复用旧结果；只有未完成的条目才继续处理。
+      for (const { paper, file } of reusedPapers.values()) {
+        const saved = await saveOriginalFile(paper.id, file)
+        if (saved) dispatch({ type: 'PATCH_PAPER', id: paper.id, patch: { fileStored: true, fileStoreError: undefined } })
+        if (!current.busyPaperIds.includes(paper.id) && paper.status !== 'parsed') {
+          await parsePaperObject(paper, file)
+        } else if (paper.status === 'parsed' && !stateRef.current.texts[paper.id]?.length) {
+          try {
+            const restored = await extractPdfPages(file)
+            persistText(paper.id, restored.pages)
+          } catch (e) {
+            issues.push({ fileName: file.name, type: 'empty', message: `已有分析保留，但正文恢复失败：${e instanceof Error ? e.message : String(e)}` })
+          }
+        }
+      }
 
       for (const p of paperList) {
         await parsePaperObject(p, fileMap.get(p.id))
@@ -1291,7 +1312,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toast('info', note.title, note.detail)
       return issues
     },
-    [parsePaperObject, toast],
+    [parsePaperObject, persistText, toast],
   )
 
   /* ---------------- 证据 ---------------- */

@@ -22,7 +22,13 @@ export function CollectionsPage() {
   const [importingPages, setImportingPages] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadIssues, setUploadIssues] = useState<string[]>([])
+  const [showLibrary, setShowLibrary] = useState(false)
+  const [librarySelection, setLibrarySelection] = useState<string[]>([])
+  const uploadLock = useRef(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const availableLibraryPapers = state.papers.filter((p) => p.source !== 'demo' && !currentCollection?.paperIds.includes(p.id))
 
   const textReadCount = collectionPapers.filter((p) => state.texts[p.id]?.length).length
   const evidenceCount = collectionPapers.filter((p) => state.methodProfiles[p.id]?.family.some((f) => f.origin === 'paper')).length
@@ -45,12 +51,22 @@ export function CollectionsPage() {
   })
 
   const onFiles = async (files: File[]) => {
-    if (!currentCollection) return
+    if (!currentCollection || uploadLock.current) return
+    uploadLock.current = true
+    setUploading(true)
+    setUploadIssues([])
+    setQuery('')
+    setFilter('all')
     try {
       const issues = await uploadFiles(files, currentCollection.id)
+      setUploadIssues(issues.map((i) => `${i.fileName}：${i.message}`))
       if (issues.length) toast('warning', `${issues.length} 篇未能导入`, issues[0]?.message ?? '')
     } catch (e) {
+      setUploadIssues([e instanceof Error ? e.message : String(e)])
       toast('error', '导入未完成', e instanceof Error ? e.message : String(e))
+    } finally {
+      uploadLock.current = false
+      setUploading(false)
     }
   }
 
@@ -166,13 +182,31 @@ export function CollectionsPage() {
                 <span className="dropzone-icon"><Icon name="plus" size={20} /></span>
                 <div className="stack-sm">
                   <div className="small strong">批量导入 PDF（可一次选多个，也可拖拽）</div>
-                  <div className="upload-help">单文件 ≤ {UPLOAD_RULES.maxFileSizeLabel}；逐篇解析，单篇失败不阻断其它论文。解析队列与阶段在下方列表里实时显示。</div>
+                  <div className="upload-help">每批最多 {UPLOAD_RULES.maxFilesPerBatch} 篇，单文件 ≤ {UPLOAD_RULES.maxFileSizeLabel}。已上传过的 PDF 会复用并加入当前集合，不会被拦截。</div>
                 </div>
                 <span className="spacer" />
-                <button className="btn" onClick={() => fileRef.current?.click()}>选择文件</button>
-                <button className="btn btn-ghost" onClick={() => navigate('/library')}>从论文库加入</button>
+                <button className="btn" disabled={uploading} onClick={() => fileRef.current?.click()}>{uploading ? '正在导入，请稍候…' : '选择文件'}</button>
+                <button className="btn btn-ghost" onClick={() => { setShowLibrary(!showLibrary); setLibrarySelection([]) }}>从论文库加入</button>
                 <input ref={fileRef} type="file" accept=".pdf" multiple hidden onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) void onFiles(files) }} />
               </div>
+
+              {uploadIssues.length > 0 && <div className="panel" role="alert"><strong>本次导入提示（已成功的论文会保留）</strong>{uploadIssues.map((issue, i) => <p key={i} className="small">{issue}</p>)}</div>}
+              {showLibrary && <section className="panel" aria-label="选择论文加入当前集合">
+                <div className="row"><strong>选择已有论文加入当前集合</strong><span className="spacer" />
+                  <button className="btn btn-sm" onClick={() => setLibrarySelection(availableLibraryPapers.map((p) => p.id))}>全选已有论文</button>
+                  <button className="btn btn-sm btn-primary" disabled={!librarySelection.length} onClick={() => {
+                    dispatch({ type: 'COLLECTION_ADD_PAPERS', id: currentCollection.id, paperIds: librarySelection })
+                    setQuery(''); setFilter('all'); setShowLibrary(false)
+                    toast('success', `已加入 ${librarySelection.length} 篇`, '复用已有正文与分析结果，没有重复调用模型。')
+                  }}>加入所选 {librarySelection.length} 篇</button>
+                  <button className="btn btn-sm" onClick={() => setShowLibrary(false)}>收起</button>
+                </div>
+                {availableLibraryPapers.length === 0 && <p>论文库中没有其它论文，可直接选择本地 PDF。</p>}
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>{availableLibraryPapers.map((p) => <label key={p.id} className="row" style={{ padding: '8px 0' }}>
+                  <input type="checkbox" checked={librarySelection.includes(p.id)} onChange={(e) => setLibrarySelection((ids) => e.target.checked ? [...ids, p.id] : ids.filter((id) => id !== p.id))} />
+                  <span>{p.title}</span><StatusChip p={p} methodAnalyzed={state.methodProfiles[p.id]?.analyzedBy === 'model'} />
+                </label>)}</div>
+              </section>}
 
               {/* 队列状态 */}
               {(pendingUpload.length > 0 || incomplete.length > 0) && (
@@ -182,7 +216,7 @@ export function CollectionsPage() {
                   </div>
                   {incomplete.length > 0 && (
                     <div className="row-tight">
-                      <button className="btn btn-sm" disabled={retrying || retryable.length === 0} onClick={async () => {
+                      <button className="btn btn-sm" disabled={uploading || retrying || pendingUpload.length > 0 || retryable.length === 0} onClick={async () => {
                         setRetrying(true)
                         try {
                           for (const paper of retryable) await reextract(paper.id)

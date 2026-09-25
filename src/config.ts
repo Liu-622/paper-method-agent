@@ -17,7 +17,7 @@ export const UPLOAD_RULES = {
   maxFileSize: 30 * 1024 * 1024,
   maxFileSizeLabel: '30 MB',
   /** 单次最多选择的文件数 */
-  maxFilesPerBatch: 10,
+  maxFilesPerBatch: 30,
 }
 
 /**
